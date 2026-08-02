@@ -1,0 +1,38 @@
+# Matched-pair configuration for pmwatch.
+#
+# Each entry links two markets on different venues that resolve on the same
+# underlying event. Matching is manual: you must verify that resolution
+# sources, deadlines, and settlement rules actually agree before treating a
+# pair as comparable.
+#
+# How to find the ids:
+#   Polymarket: every binary market has two CLOB token ids (YES and NO).
+#     Query the Gamma API, e.g.
+#       curl 'https://gamma-api.polymarket.com/markets?slug=<market-slug>'
+#     and read the `clobTokenIds` field (a JSON-encoded list; the first entry
+#     is the YES token). Use the YES token id below.
+#     Docs: https://docs.polymarket.com
+#   Kalshi: the market ticker, visible in the market URL and via
+#       curl 'https://api.elections.kalshi.com/trade-api/v2/markets?limit=100'
+#     e.g. KXFEDCUT-26SEP.
+#
+# Fees: approximate per-leg taker fees in basis points of notional, applied
+# linearly (fee = price * bps / 10_000). These are configuration, not venue
+# truth — venue fee schedules change and are often price-dependent (Kalshi's
+# is ~0.07 * C * P * (1-P) per contract, which a flat bps only approximates).
+# Conservative (larger) values make detection more selective.
+
+pairs:
+  - name: fed-cut-sep-2026
+    question: "Fed rate cut at the September 2026 FOMC meeting?"
+    venue_a_id: "polymarket:71421073552824748158727123880192916231126298749016433804985512678244506118802"
+    venue_b_id: "kalshi:KXFEDCUT-26SEP"
+    fee_bps_a: 0      # Polymarket: no taker fee on most markets at time of writing
+    fee_bps_b: 50     # Kalshi: flat approximation of its price-dependent fee
+
+  - name: us-recession-2026
+    question: "US recession officially declared in 2026?"
+    venue_a_id: "polymarket:10991116138533105882592986411493613034453350373791148161637446953207610462207"
+    venue_b_id: "kalshi:KXRECESSION-26"
+    fee_bps_a: 0
+    fee_bps_b: 50

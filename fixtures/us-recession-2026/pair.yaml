@@ -1,0 +1,6 @@
+name: us-recession-2026
+question: "US recession officially declared in 2026?"
+venue_a_id: "polymarket:10991116138533105882592986411493613034453350373791148161637446953207610462207"
+venue_b_id: "kalshi:KXRECESSION-26"
+fee_bps_a: 0
+fee_bps_b: 50

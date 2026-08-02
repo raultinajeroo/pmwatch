@@ -1,0 +1,8 @@
+# Matched-pair metadata for the bundled fixture set (same schema as
+# config/pairs.example.yaml). These are the fees used during replay.
+name: fed-cut-sep-2026
+question: "Fed rate cut at the September 2026 FOMC meeting?"
+venue_a_id: "polymarket:71421073552824748158727123880192916231126298749016433804985512678244506118802"
+venue_b_id: "kalshi:KXFEDCUT-26SEP"
+fee_bps_a: 0
+fee_bps_b: 50
