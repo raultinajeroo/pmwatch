@@ -4,21 +4,21 @@ Watching prediction-market venues disagree with each other.
 
 pmwatch is a cross-venue prediction-market microstructure monitor. It
 snapshots order books for matched markets across venues (Polymarket primary,
-Kalshi via adapter), detects cross-venue price dislocations — including the
-buy-YES-on-A + buy-NO-on-B arbitrage, net of configurable fees — stores
+Kalshi via adapter), detects cross-venue price dislocations (including the
+buy-YES-on-A + buy-NO-on-B arbitrage, net of configurable fees), stores
 everything in SQLite, and writes a daily markdown research digest.
 
 ## Why
 
 Prediction markets have grown from a novelty into real, persistent venues
 for event risk, and the same event now trades on multiple venues at once.
-But cross-venue microstructure — where the books disagree, by how much, and
-for how long — is under-instrumented relative to its interest: most tooling
+But cross-venue microstructure (where the books disagree, by how much, and
+for how long) is under-instrumented relative to its interest: most tooling
 watches one venue at a time. pmwatch is a small, honest instrument for
 studying that gap.
 
-It is a **research/learning instrument**. It is strictly **read-only** —
-there is no order-placement code anywhere in this repository — and nothing
+It is a **research/learning instrument**. It is strictly **read-only**
+(there is no order-placement code anywhere in this repository) and nothing
 it produces is trading advice.
 
 ## Architecture
@@ -137,9 +137,9 @@ Episodes, not single prints:
 - **Hysteresis**: once open, an episode stays open until edge < 0.5c
   (`close_edge`), so a marginal signal doesn't flap.
 - **Divergence**: `|mid_A - mid_B| >= divergence_threshold` (default 0.03)
-  is tracked separately as `kind="divergence"` — informational; two venues
-  can disagree on mid without any tradeable cross, since each book has its
-  own spread.
+  is tracked separately as `kind="divergence"`, which is informational: two
+  venues can disagree on mid without any tradeable cross, since each book has
+  its own spread.
 
 A `Dislocation` record aggregates an episode: first/last seen, observation
 count, max edge, and a details dict with the price legs (so every flagged
@@ -162,7 +162,7 @@ pmwatch watch --pairs config/pairs.example.yaml --db pmwatch.db --interval 60
 - **Kalshi** needs `KALSHI_API_KEY` and `KALSHI_API_SECRET` (PEM private
   key) in the environment, plus `pip install cryptography` for request
   signing. If `KALSHI_API_KEY` is unset, pmwatch falls back to **paper
-  mode** — Kalshi-shaped data served from `fixtures/`, with a loud warning
+  mode**: Kalshi-shaped data served from `fixtures/`, with a loud warning
   on stderr so fixture data can never be mistaken for live data.
 - If a venue is unreachable, `collect` exits with code 2 and a clear
   message; it never dumps a traceback on a network failure.
@@ -203,7 +203,7 @@ bundled fixtures and synthetic books. CI runs the suite on Python 3.11 and
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Raul Tinajero Olivas.
+MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Raul Tinajero Olivas.
 
 pmwatch is a read-only research instrument. Nothing in this repository is
 trading advice.
