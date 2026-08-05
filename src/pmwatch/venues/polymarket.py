@@ -47,7 +47,7 @@ def _parse_json_list(value: object) -> list:
 
 
 class PolymarketClient(VenueClient):
-    """httpx-backed client with a timeout and exactly one retry per request."""
+    """httpx-backed client with rate limiting and jittered backoff."""
 
     venue = "polymarket"
 
@@ -56,31 +56,28 @@ class PolymarketClient(VenueClient):
         gamma_base: str = GAMMA_BASE,
         clob_base: str = CLOB_BASE,
         timeout: float = 10.0,
+        min_interval_s: float = 0.5,
         client: httpx.Client | None = None,
     ) -> None:
+        from ..net import RateLimiter
+
         self.gamma_base = gamma_base.rstrip("/")
         self.clob_base = clob_base.rstrip("/")
         self.timeout = timeout
         self._client = client or httpx.Client(timeout=timeout)
+        self._limiter = RateLimiter(min_interval_s)
         self._market_cache: dict[str, dict] = {}
 
     def _get_json(self, url: str, params: dict | None = None) -> object:
-        last_exc: Exception | None = None
-        for attempt in (1, 2):  # one retry
-            try:
-                resp = self._client.get(url, params=params)
-                resp.raise_for_status()
-                return resp.json()
-            except (httpx.TransportError, httpx.HTTPStatusError) as exc:
-                last_exc = exc
-                # Retry only transport errors and 5xx; 4xx is a client bug.
-                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
-                    break
-                if attempt == 1:
-                    continue
-        raise VenueError(
-            f"polymarket request failed: GET {url} params={params}: {last_exc}"
-        ) from last_exc
+        from ..net import get_json_with_backoff
+
+        return get_json_with_backoff(
+            self._client,
+            url,
+            venue="polymarket",
+            params=params,
+            limiter=self._limiter,
+        )
 
     def list_markets(self, limit: int = 25) -> list[dict]:
         data = self._get_json(
