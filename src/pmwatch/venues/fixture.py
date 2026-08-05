@@ -123,3 +123,26 @@ class FixtureVenue(VenueClient):
         entry = self._entry(market_id)
         latest_ts = max(entry["snaps"], key=parse_ts)
         return entry["snaps"][latest_ts]
+
+
+class CyclingFixtureVenue(FixtureVenue):
+    """Demo-mode venue: walks each market's recorded snapshots in order.
+
+    Every ``get_book`` call advances that market's cursor to the next
+    recorded timestamp (wrapping at the end), so a demo collection loop
+    exercises the same code path as live collection while serving only
+    fixture data. Snapshots keep their fixture timestamps and venue labels;
+    callers are responsible for labeling stored rows as ``demo``.
+    """
+
+    def __init__(self, root: str | Path) -> None:
+        super().__init__(root)
+        self._cursors: dict[str, int] = {}
+
+    def get_book(self, market_id: str) -> BookSnapshot:
+        entry = self._entry(market_id)
+        ordered = [entry["snaps"][ts] for ts in sorted(entry["snaps"], key=parse_ts)]
+        cursor = self._cursors.get(market_id, 0)
+        snap = ordered[cursor % len(ordered)]
+        self._cursors[market_id] = cursor + 1
+        return snap

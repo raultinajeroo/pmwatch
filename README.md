@@ -147,27 +147,61 @@ A `Dislocation` record aggregates an episode: first/last seen, observation
 count, max edge, and a details dict with the price legs (so every flagged
 edge can be audited against the stored books). All thresholds are CLI flags.
 
-## Live usage (your machine, your network)
+## Modes: fixture, demo, live
 
-```bash
-# one collection pass
-pmwatch collect --pairs config/pairs.example.yaml --db pmwatch.db
+pmwatch has exactly three ways to obtain snapshots, and every stored row
+and digest section is labeled with the one that produced it.
 
-# loop every 60s until Ctrl-C
-pmwatch watch --pairs config/pairs.example.yaml --db pmwatch.db --interval 60
-```
+- **fixture** (default): the offline replay above. No keys, no network.
+- **demo**: the *live collection code path* driven entirely from fixture
+  data — pairing, engine, storage, and digest all exercised, no keys, no
+  network. Stored rows are labeled `demo`, and the digest gets its own
+  clearly-marked Demo section with venue status and matched-pair coverage.
 
-- **Polymarket** needs no credentials. Market ids are CLOB token ids; find
-  them via `curl 'https://gamma-api.polymarket.com/markets?slug=<slug>'`
+  ```bash
+  pmwatch demo --pairs config/pairs.example.yaml --db /tmp/pmwatch_demo.db \
+               --max-iterations 3 --out digest_demo.md
+  ```
+
+- **live**: real venue API calls. Live mode refuses to start without the
+  required credentials and never falls back silently to fixture data.
+
+  ```bash
+  # validate pair matching and credentials first: no network, no writes
+  pmwatch live --pairs config/pairs.example.yaml --interval 300 \
+               --db pmwatch_live.db --out digest_live.md --dry-run
+
+  # then collect for real (Ctrl-C to stop; digest written at exit)
+  pmwatch live --pairs config/pairs.example.yaml --interval 300 \
+               --db pmwatch_live.db --out digest_live.md
+  ```
+
+The mode can also come from `PMWATCH_MODE` or a yaml config (`--config`,
+`$PMWATCH_CONFIG`, or `./pmwatch.yaml` with keys `mode`, `db`, `interval`,
+`fixtures`, `out`); a `--mode` flag wins over both. The legacy `collect`
+and `watch` commands take `--mode demo|live` and default to fixture, where
+they point you at `replay` instead of guessing.
+
+### Credentials (live mode only)
+
+- **Polymarket** read endpoints need no credentials. Market ids are CLOB
+  token ids; find them via
+  `curl 'https://gamma-api.polymarket.com/markets?slug=<slug>'`
   (field `clobTokenIds`, first entry is the YES token). Docs:
   <https://docs.polymarket.com>
-- **Kalshi** needs `KALSHI_API_KEY` and `KALSHI_API_SECRET` (PEM private
-  key) in the environment, plus `pip install cryptography` for request
-  signing. If `KALSHI_API_KEY` is unset, pmwatch falls back to **paper
-  mode**: Kalshi-shaped data served from `fixtures/`, with a loud warning
-  on stderr so fixture data can never be mistaken for live data.
-- If a venue is unreachable, `collect` exits with code 2 and a clear
-  message; it never dumps a traceback on a network failure.
+- **Kalshi** signs read requests with RSA-PSS and needs two environment
+  variables: `KALSHI_API_KEY` and `KALSHI_API_SECRET` (the PEM private
+  key), plus `pip install ".[live]"` for the `cryptography` package. If
+  anything is missing or the PEM does not parse, live mode exits with a
+  message naming exactly what is missing and how to provide it — before
+  any network call, never a traceback. `--dry-run` checks all of this
+  offline.
+
+Live requests go through a shared rate limiter (minimum interval per
+venue) with bounded retries and jittered exponential backoff. Every stored
+snapshot records its provenance (`source` column: fixture/demo/live) and
+its wall-clock fetch time (`fetched_at`, added by the v2 schema migration;
+old databases upgrade automatically).
 
 Matched pairs are configured in a YAML file (see
 `config/pairs.example.yaml` for the annotated format). Matching markets

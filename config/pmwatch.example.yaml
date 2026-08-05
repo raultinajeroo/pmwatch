@@ -1,0 +1,14 @@
+# Example pmwatch config. Loaded via --config, $PMWATCH_CONFIG, or as
+# ./pmwatch.yaml when present. Precedence for the mode:
+# --mode CLI flag > $PMWATCH_MODE > `mode:` in this file > fixture.
+#
+# mode: fixture | demo | live
+#   fixture (the default) is the offline replay; use `pmwatch replay`.
+#   demo runs the collection code path on fixture data: no keys, no network.
+#   live makes real venue API calls and requires credentials (see README).
+
+mode: demo
+db: pmwatch_demo.db
+interval: 60
+fixtures: fixtures
+out: digest.md

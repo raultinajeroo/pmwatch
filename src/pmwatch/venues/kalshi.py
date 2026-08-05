@@ -1,4 +1,4 @@
-"""Kalshi venue client (read-only) plus an offline paper mode.
+"""Kalshi venue client (read-only, live mode only).
 
 Live API: ``https://api.elections.kalshi.com/trade-api/v2``.
 
@@ -17,26 +17,22 @@ Authentication: Kalshi signs requests with an RSA private key
 endpoints on the v2 API still require the signed headers, so the live client
 needs the ``cryptography`` package at runtime.
 
-If ``KALSHI_API_KEY`` is not set, :func:`make_kalshi_client` returns a
-paper-mode client that serves Kalshi-shaped data from the bundled fixtures,
-with a one-line warning on stderr. Paper mode keeps ``collect``/``watch``
-usable for demos without credentials.
+Offline runs do not use this module at all: fixture mode replays fixtures
+via ``pmwatch replay`` and demo mode drives the collection path from
+fixtures via ``pmwatch demo``. Credential validation lives in
+``pmwatch.credentials``.
 """
 
 from __future__ import annotations
 
 import base64
-import os
-import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 import httpx
 
 from ..models import BookSide, BookSnapshot
 from .base import VenueClient, VenueError
-from .fixture import FixtureVenue
 
 KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 
@@ -52,12 +48,16 @@ class KalshiClient(VenueClient):
         private_key_pem: str,
         base: str = KALSHI_BASE,
         timeout: float = 10.0,
+        min_interval_s: float = 1.0,
         client: httpx.Client | None = None,
     ) -> None:
+        from ..net import RateLimiter
+
         self.api_key = api_key
         self.base = base.rstrip("/")
         self.timeout = timeout
         self._client = client or httpx.Client(timeout=timeout)
+        self._limiter = RateLimiter(min_interval_s)
         self._market_cache: dict[str, dict] = {}
         try:
             from cryptography.hazmat.primitives import hashes, serialization
@@ -94,20 +94,17 @@ class KalshiClient(VenueClient):
         }
 
     def _get_json(self, path: str, params: dict | None = None) -> object:
+        from ..net import get_json_with_backoff
+
         headers = self._sign_headers("GET", path)
-        last_exc: Exception | None = None
-        for attempt in (1, 2):  # one retry
-            try:
-                resp = self._client.get(f"{self.base}{path}", params=params, headers=headers)
-                resp.raise_for_status()
-                return resp.json()
-            except (httpx.TransportError, httpx.HTTPStatusError) as exc:
-                last_exc = exc
-                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
-                    break
-                if attempt == 1:
-                    continue
-        raise VenueError(f"kalshi request failed: GET {path}: {last_exc}") from last_exc
+        return get_json_with_backoff(
+            self._client,
+            f"{self.base}{path}",
+            venue="kalshi",
+            params=params,
+            headers=headers,
+            limiter=self._limiter,
+        )
 
     def list_markets(self, limit: int = 25) -> list[dict]:
         data = self._get_json("/markets", params={"limit": limit, "status": "open"})
@@ -153,44 +150,3 @@ class KalshiClient(VenueClient):
             asks=asks,
             outcomes=meta["outcomes"],
         )
-
-
-class KalshiPaperMode(VenueClient):
-    """Serves Kalshi-labelled snapshots from fixtures (no credentials needed)."""
-
-    venue = "kalshi"
-
-    def __init__(self, fixtures_dir: str | Path) -> None:
-        self._fixture = FixtureVenue(fixtures_dir)
-
-    def list_markets(self) -> list[dict]:
-        return [m for m in self._fixture.list_markets() if m["venue"] == "kalshi"]
-
-    def get_book(self, market_id: str) -> BookSnapshot:
-        snap = self._fixture.get_book(market_id)
-        if snap.venue != "kalshi":
-            raise VenueError(
-                f"kalshi paper mode: market {market_id!r} is a {snap.venue} fixture"
-            )
-        return snap
-
-
-def make_kalshi_client(fixtures_dir: str | Path | None = None, **kwargs) -> VenueClient:
-    """Build a live KalshiClient when credentials exist, else paper mode.
-
-    Reads ``KALSHI_API_KEY`` and ``KALSHI_API_SECRET`` (PEM private key) from
-    the environment. Without them, returns :class:`KalshiPaperMode` backed by
-    ``fixtures_dir`` (default: ``fixtures/`` in the current working directory)
-    and prints a loud one-line warning to stderr.
-    """
-    api_key = os.environ.get("KALSHI_API_KEY")
-    api_secret = os.environ.get("KALSHI_API_SECRET", "")
-    if api_key:
-        return KalshiClient(api_key=api_key, private_key_pem=api_secret, **kwargs)
-    root = Path(fixtures_dir) if fixtures_dir else Path("fixtures")
-    print(
-        "WARNING: KALSHI_API_KEY not set; using Kalshi paper mode "
-        f"(fixture data from {root}/, NOT live Kalshi data)",
-        file=sys.stderr,
-    )
-    return KalshiPaperMode(root)
