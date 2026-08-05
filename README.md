@@ -56,6 +56,8 @@ cross-venue arb for 6 snapshots and then closes; the other stays aligned.
 Everything below runs offline and every number is fixture-derived.
 
 ```bash
+git clone https://github.com/raultinajeroo/pmwatch.git
+cd pmwatch
 pip install -e .
 pmwatch replay --fixtures fixtures/ --db /tmp/pmwatch_replay.db
 ```
@@ -189,6 +191,9 @@ rules must genuinely agree before two markets are comparable.
   market matching.
 - The engine's episode state is in-memory; `watch` rebuilds it on restart
   (stored episodes are persisted, open ones are not).
+
+Possible future directions (none of them implemented or promised) live in
+[ROADMAP.md](ROADMAP.md).
 
 ## Development
 
