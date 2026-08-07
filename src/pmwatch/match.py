@@ -20,7 +20,7 @@ from pathlib import Path
 
 import yaml
 
-from .models import MatchedPair
+from .models import FEE_MODELS, MatchedPair
 
 KNOWN_VENUES = {"polymarket", "kalshi"}
 
@@ -42,6 +42,12 @@ def _validate_pair(raw: dict, source: str) -> MatchedPair:
         value = raw.get(key, 0.0)
         if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
             problems.append(f"{key!r} must be a non-negative number, got {value!r}")
+    for key in ("fee_model_a", "fee_model_b"):
+        value = raw.get(key, "flat_bps")
+        if value not in FEE_MODELS:
+            problems.append(
+                f"{key!r} must be one of {', '.join(FEE_MODELS)}, got {value!r}"
+            )
     for key in ("venue_a_id", "venue_b_id"):
         value = raw.get(key)
         if not value:
@@ -67,6 +73,8 @@ def _validate_pair(raw: dict, source: str) -> MatchedPair:
         fee_bps_a=float(raw.get("fee_bps_a", 0.0)),
         fee_bps_b=float(raw.get("fee_bps_b", 0.0)),
         question=str(raw.get("question", "")),
+        fee_model_a=str(raw.get("fee_model_a", "flat_bps")),
+        fee_model_b=str(raw.get("fee_model_b", "flat_bps")),
     )
 
 

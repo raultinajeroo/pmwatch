@@ -8,12 +8,18 @@ For a matched binary pair (venue A, venue B), let
 - ``nB`` = best ask of the NO token on venue B (derived as ``1 - best YES bid``)
 
 Buying YES on A and NO on B pays exactly $1 in every state of the world, so
-the per-unit edge after proportional fees is::
+the per-unit edge after fees is::
 
     edge_AB = 1 - aA - nB - fees
-    fees    = (aA * fee_bps_a + nB * fee_bps_b) / 10_000
+    fees    = fee_a.per_unit(aA) + fee_b.per_unit(nB)
 
 The symmetric direction (YES on B + NO on A) gives ``edge_BA``.
+
+Each leg carries its own fee model (see :class:`pmwatch.models.FeeModel`).
+``flat_bps`` is linear in price; ``kalshi`` is the venue's published
+``0.07 * P * (1 - P)`` quadratic, which peaks mid-book. Using a flat
+approximation where the venue charges the quadratic manufactures phantom
+arbs at mid-range prices, so the model matters as much as the parameter.
 
 Episode rules
 -------------
@@ -33,28 +39,39 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from .models import BookSnapshot, Dislocation, MatchedPair
+from .models import BookSnapshot, Dislocation, FeeModel, MatchedPair
 
 KIND_ARB = "arb"
 KIND_DIVERGENCE = "divergence"
 
 
-def leg_fees(yes_price: float, fee_bps_yes: float, no_price: float, fee_bps_no: float) -> float:
-    """Proportional taker fees for a YES leg and a NO leg, in dollars."""
-    return (yes_price * fee_bps_yes + no_price * fee_bps_no) / 10_000.0
+def _as_fee(fee: FeeModel | float) -> FeeModel:
+    """Coerce a fee argument. A bare number means flat basis points, which is
+    what these functions accepted before fee models existed."""
+    return fee if isinstance(fee, FeeModel) else FeeModel(bps=float(fee))
+
+
+def leg_fees(
+    yes_price: float,
+    fee_yes: FeeModel | float,
+    no_price: float,
+    fee_no: FeeModel | float,
+) -> float:
+    """Taker fees for a YES leg and a NO leg, in dollars per unit."""
+    return _as_fee(fee_yes).per_unit(yes_price) + _as_fee(fee_no).per_unit(no_price)
 
 
 def arb_edge(
     yes_ask: float,
-    fee_bps_yes_venue: float,
+    fee_yes_venue: FeeModel | float,
     no_ask: float,
-    fee_bps_no_venue: float,
+    fee_no_venue: FeeModel | float,
 ) -> float:
     """Edge from buying YES at ``yes_ask`` on one venue and NO at ``no_ask``
     on the other, after fees. Positive means the two legs cost less than $1.
     """
     return 1.0 - yes_ask - no_ask - leg_fees(
-        yes_ask, fee_bps_yes_venue, no_ask, fee_bps_no_venue
+        yes_ask, fee_yes_venue, no_ask, fee_no_venue
     )
 
 
@@ -71,8 +88,8 @@ def compute_edges(pair: MatchedPair, snap_a: BookSnapshot, snap_b: BookSnapshot)
     if None in (a_yes_ask, b_yes_ask, a_no_ask, b_no_ask):
         raise ValueError("cannot compute edges on an empty book")
 
-    edge_ab = arb_edge(a_yes_ask, pair.fee_bps_a, b_no_ask, pair.fee_bps_b)
-    edge_ba = arb_edge(b_yes_ask, pair.fee_bps_b, a_no_ask, pair.fee_bps_a)
+    edge_ab = arb_edge(a_yes_ask, pair.fee_a, b_no_ask, pair.fee_b)
+    edge_ba = arb_edge(b_yes_ask, pair.fee_b, a_no_ask, pair.fee_a)
     divergence = abs(snap_a.mid - snap_b.mid)  # type: ignore[operator]
 
     return {
@@ -214,11 +231,13 @@ class DislocationEngine:
                     "buy_no": pair.venue_b_id,
                     "yes_ask": legs["a_yes_ask"],
                     "no_ask": legs["b_no_ask"],
+                    "fee_model_yes_venue": pair.fee_model_a,
+                    "fee_model_no_venue": pair.fee_model_b,
                     "fee_bps_yes_venue": pair.fee_bps_a,
                     "fee_bps_no_venue": pair.fee_bps_b,
                     "fees": leg_fees(
-                        legs["a_yes_ask"], pair.fee_bps_a,
-                        legs["b_no_ask"], pair.fee_bps_b,
+                        legs["a_yes_ask"], pair.fee_a,
+                        legs["b_no_ask"], pair.fee_b,
                     ),
                 },
             ),
@@ -231,11 +250,13 @@ class DislocationEngine:
                     "buy_no": pair.venue_a_id,
                     "yes_ask": legs["b_yes_ask"],
                     "no_ask": legs["a_no_ask"],
+                    "fee_model_yes_venue": pair.fee_model_b,
+                    "fee_model_no_venue": pair.fee_model_a,
                     "fee_bps_yes_venue": pair.fee_bps_b,
                     "fee_bps_no_venue": pair.fee_bps_a,
                     "fees": leg_fees(
-                        legs["b_yes_ask"], pair.fee_bps_b,
-                        legs["a_no_ask"], pair.fee_bps_a,
+                        legs["b_yes_ask"], pair.fee_b,
+                        legs["a_no_ask"], pair.fee_a,
                     ),
                 },
             ),

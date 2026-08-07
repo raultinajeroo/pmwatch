@@ -99,7 +99,11 @@ def test_example_pairs_config_valid():
     assert len(pairs) == 2
     assert pairs[0].venue_a == "polymarket"
     assert pairs[0].venue_b == "kalshi"
-    assert pairs[0].fee_bps_b == 50.0
+    # The Kalshi leg uses the venue's own price-dependent schedule, not a
+    # flat-bps stand-in; the Polymarket leg is flat at zero.
+    assert pairs[0].fee_model_b == "kalshi"
+    assert pairs[0].fee_model_a == "flat_bps"
+    assert pairs[0].fee_bps_a == 0.0
 
 
 def test_pairs_config_validation(tmp_path):

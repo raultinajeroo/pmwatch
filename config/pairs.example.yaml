@@ -16,23 +16,33 @@
 #       curl 'https://api.elections.kalshi.com/trade-api/v2/markets?limit=100'
 #     e.g. KXFEDCUT-26SEP.
 #
-# Fees: approximate per-leg taker fees in basis points of notional, applied
-# linearly (fee = price * bps / 10_000). These are configuration, not venue
-# truth — venue fee schedules change and are often price-dependent (Kalshi's
-# is ~0.07 * C * P * (1-P) per contract, which a flat bps only approximates).
-# Conservative (larger) values make detection more selective.
+# Fees: each leg picks a model with `fee_model_a` / `fee_model_b`. These are
+# configuration, not venue truth — venue schedules change.
+#
+#   flat_bps (default)  fee = price * fee_bps / 10_000. Linear. Correct for a
+#                       flat proportional taker fee, and correct at 0 bps for
+#                       Polymarket, which charges no taker fee on most markets.
+#   kalshi              fee = 0.07 * price * (1 - price) per contract, Kalshi's
+#                       published schedule. Quadratic: it peaks at 1.75c near a
+#                       price of 0.50 and falls to ~0 at the extremes.
+#
+# Use the model the venue actually charges. A flat-bps stand-in on a Kalshi leg
+# understates the true fee by roughly 7.5x mid-book (0.23c against 1.74c at a
+# price of 0.455), which is enough to manufacture arbs that do not exist.
 
 pairs:
   - name: fed-cut-sep-2026
     question: "Fed rate cut at the September 2026 FOMC meeting?"
     venue_a_id: "polymarket:71421073552824748158727123880192916231126298749016433804985512678244506118802"
     venue_b_id: "kalshi:KXFEDCUT-26SEP"
-    fee_bps_a: 0      # Polymarket: no taker fee on most markets at time of writing
-    fee_bps_b: 50     # Kalshi: flat approximation of its price-dependent fee
+    fee_model_a: flat_bps   # Polymarket: no taker fee on most markets
+    fee_bps_a: 0
+    fee_model_b: kalshi     # Kalshi: its published 0.07 * P * (1-P) schedule
 
   - name: us-recession-2026
     question: "US recession officially declared in 2026?"
     venue_a_id: "polymarket:10991116138533105882592986411493613034453350373791148161637446953207610462207"
     venue_b_id: "kalshi:KXRECESSION-26"
+    fee_model_a: flat_bps
     fee_bps_a: 0
-    fee_bps_b: 50
+    fee_model_b: kalshi

@@ -136,14 +136,56 @@ class BookSnapshot:
         )
 
 
+KALSHI_FEE_COEFF = 0.07
+
+FEE_MODELS = ("flat_bps", "kalshi")
+
+
+@dataclass(frozen=True)
+class FeeModel:
+    """Per-unit taker fee for one leg of a trade, in dollars.
+
+    ``flat_bps`` charges ``price * bps / 10_000``: a linear approximation,
+    correct for a venue with a flat proportional taker fee, and correct at
+    ``bps=0`` for Polymarket, which charges no taker fee on these markets.
+
+    ``kalshi`` charges ``coeff * price * (1 - price)``, which is Kalshi's
+    published schedule (``0.07 * C * P * (1 - P)``, rounded up to the cent
+    per order; the rounding is not modeled here because it depends on order
+    size, so this is a slight *under*estimate). The quadratic peaks at
+    1.75c per contract near a price of 0.50 and falls toward zero at both
+    extremes. A flat-bps stand-in therefore understates the true fee badly
+    mid-book: at a price of 0.455, 50bps charges 0.23c against a real
+    1.74c, which is enough to manufacture a phantom 1.5c arb.
+    """
+
+    model: str = "flat_bps"
+    bps: float = 0.0
+    coeff: float = KALSHI_FEE_COEFF
+
+    def __post_init__(self) -> None:
+        if self.model not in FEE_MODELS:
+            raise ValueError(
+                f"unknown fee model {self.model!r}; expected one of "
+                f"{', '.join(FEE_MODELS)}"
+            )
+
+    def per_unit(self, price: float) -> float:
+        if self.model == "kalshi":
+            return self.coeff * price * (1.0 - price)
+        return price * self.bps / 10_000.0
+
+
 @dataclass
 class MatchedPair:
     """Two markets on different venues that resolve on the same event.
 
     ``venue_a_id`` / ``venue_b_id`` carry the venue prefix so a pair is
     self-describing, e.g. ``polymarket:7142...`` or ``kalshi:KXFEDCUT-26SEP``.
-    ``fee_bps_*`` are approximate taker fees in basis points applied to the
-    notional of each leg; they are configuration, not venue truth.
+
+    Fees are per-leg and are configuration, not venue truth. ``fee_model_*``
+    selects the shape (see :class:`FeeModel`); ``fee_bps_*`` parameterises the
+    ``flat_bps`` shape and is ignored by the ``kalshi`` shape.
     """
 
     name: str
@@ -152,6 +194,16 @@ class MatchedPair:
     fee_bps_a: float = 0.0
     fee_bps_b: float = 0.0
     question: str = ""
+    fee_model_a: str = "flat_bps"
+    fee_model_b: str = "flat_bps"
+
+    @property
+    def fee_a(self) -> FeeModel:
+        return FeeModel(self.fee_model_a, self.fee_bps_a)
+
+    @property
+    def fee_b(self) -> FeeModel:
+        return FeeModel(self.fee_model_b, self.fee_bps_b)
 
     @staticmethod
     def split_id(qualified_id: str) -> tuple[str, str]:

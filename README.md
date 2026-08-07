@@ -218,9 +218,13 @@ rules must genuinely agree before two markets are comparable.
   size at best prices; it ignores queue position, partial fills, latency,
   and venue-specific settlement risk. A positive edge on screen is not a
   realized profit.
-- **Fees are flat-bps configuration**, not venue truth. Kalshi's actual fee
-  schedule is price-dependent; `fee_bps` is a conservative approximation you
-  are expected to tune.
+- **Fees are configuration**, not venue truth. Each leg picks a model:
+  `flat_bps` (linear, `price * bps / 10_000`) or `kalshi` (the venue's
+  published `0.07 * P * (1-P)` per contract). Kalshi's is quadratic and peaks
+  at 1.75c mid-book, so a flat-bps stand-in on a Kalshi leg understates the
+  real fee by ~7.5x around a price of 0.455 and can manufacture arbs that do
+  not exist. Kalshi rounds fees up to the cent per order, which is not
+  modeled here, so the `kalshi` model is a slight underestimate.
 - **Matched pairs are manual** and small in number; there is no automated
   market matching.
 - The engine's episode state is in-memory; `watch` rebuilds it on restart

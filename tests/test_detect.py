@@ -10,7 +10,7 @@ from pmwatch.detect import (
     compute_edges,
     leg_fees,
 )
-from pmwatch.models import parse_ts
+from pmwatch.models import FeeModel, parse_ts
 from conftest import make_snapshot
 
 # Exact planted math for fixtures/fed-cut-sep-2026, snapshots 1-6:
@@ -37,6 +37,39 @@ def test_arb_edge_formula():
     assert edge == pytest.approx(0.023, abs=1e-12)
     # crossed books with no fees give exactly the gross edge
     assert arb_edge(0.50, 0.0, 0.45, 0.0) == pytest.approx(0.05, abs=1e-12)
+
+
+def test_kalshi_fee_is_quadratic_in_price():
+    fee = FeeModel("kalshi")
+    # 0.07 * P * (1 - P): peaks at 1.75c mid-book, ~0 at the extremes.
+    assert fee.per_unit(0.50) == pytest.approx(0.0175, abs=1e-12)
+    assert fee.per_unit(0.455) == pytest.approx(0.07 * 0.455 * 0.545, abs=1e-12)
+    assert fee.per_unit(0.01) == pytest.approx(0.07 * 0.01 * 0.99, abs=1e-12)
+    # symmetric about 0.5
+    assert fee.per_unit(0.2) == pytest.approx(fee.per_unit(0.8), abs=1e-12)
+
+
+def test_flat_bps_understates_kalshi_fee_mid_book():
+    """The reason the model matters: at mid-range prices a 50bps stand-in
+    charges a fraction of the real fee, which manufactures phantom arbs."""
+    flat = FeeModel("flat_bps", bps=50.0).per_unit(0.455)
+    real = FeeModel("kalshi").per_unit(0.455)
+    assert flat == pytest.approx(0.002275, abs=1e-9)
+    assert real == pytest.approx(0.01735825, abs=1e-9)
+    assert real > flat * 7
+
+
+def test_bare_float_fee_argument_still_means_flat_bps():
+    """Backwards compatibility: the pre-FeeModel positional signature."""
+    assert leg_fees(0.575, 0.0, 0.400, 50.0) == pytest.approx(
+        leg_fees(0.575, FeeModel(bps=0.0), 0.400, FeeModel("flat_bps", 50.0)),
+        abs=1e-12,
+    )
+
+
+def test_unknown_fee_model_is_rejected():
+    with pytest.raises(ValueError, match="unknown fee model"):
+        FeeModel("definitely-not-a-model")
 
 
 def test_planted_arb_detected_with_exact_edge(fed_pair, fixture_venue):
