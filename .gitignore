@@ -13,3 +13,8 @@ venv/
 *.sqlite
 *.sqlite3
 .env
+
+# private working notes
+BACKLOG.md
+PAIRS_WORKSHEET.md
+pairs.private.yaml
