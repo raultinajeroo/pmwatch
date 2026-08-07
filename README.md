@@ -230,8 +230,8 @@ rules must genuinely agree before two markets are comparable.
 - The engine's episode state is in-memory; `watch` rebuilds it on restart
   (stored episodes are persisted, open ones are not).
 
-Possible future directions (none of them implemented or promised) live in
-[ROADMAP.md](ROADMAP.md).
+This README documents current behavior only; nothing beyond it is planned
+or promised here.
 
 ## Development
 
