@@ -166,16 +166,32 @@ def _collect_once(
     store: Store,
     engine: DislocationEngine,
     source: str,
+    fail_fast: bool = False,
 ) -> list[Dislocation]:
-    """One collection pass over all pairs. Returns newly closed episodes."""
+    """One collection pass over all pairs. Returns newly closed episodes.
+
+    A pair that fails (venue error, or a book with an empty side, which is a
+    legitimate market state) is skipped for this pass so the remaining pairs
+    still get observed. Unless ``fail_fast``, in which case it propagates.
+    """
     closed_all: list[Dislocation] = []
     fetched_at = format_ts(datetime.now(tz=timezone.utc))
     for pair in pairs:
-        snap_a = clients[pair.venue_a].get_book(pair.market_id_a)
-        snap_b = clients[pair.venue_b].get_book(pair.market_id_b)
-        store.upsert_snapshot(snap_a, source=source, fetched_at=fetched_at)
-        store.upsert_snapshot(snap_b, source=source, fetched_at=fetched_at)
-        closed = engine.process(pair, snap_a, snap_b)
+        try:
+            snap_a = clients[pair.venue_a].get_book(pair.market_id_a)
+            snap_b = clients[pair.venue_b].get_book(pair.market_id_b)
+            store.upsert_snapshot(snap_a, source=source, fetched_at=fetched_at)
+            store.upsert_snapshot(snap_b, source=source, fetched_at=fetched_at)
+            closed = engine.process(pair, snap_a, snap_b)
+        except (VenueError, httpx.HTTPError, ValueError) as exc:
+            if fail_fast:
+                raise
+            print(
+                f"{PROG}: warning: {pair.name}: skipped this pass: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
         for d in closed:
             store.upsert_dislocation(d, source=source)
         closed_all.extend(closed)
@@ -244,7 +260,10 @@ def _run_collection(args: argparse.Namespace, mode: str) -> int:
             while True:
                 iteration += 1
                 try:
-                    _collect_once(pairs, clients, store, engine, source=mode)
+                    _collect_once(
+                        pairs, clients, store, engine, source=mode,
+                        fail_fast=fail_fast,
+                    )
                 except (VenueError, httpx.HTTPError) as exc:
                     if fail_fast:
                         return _err(
