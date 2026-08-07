@@ -4,11 +4,14 @@ Live API: ``https://api.elections.kalshi.com/trade-api/v2``.
 
 - ``GET /markets?limit=...`` lists markets (items include ``ticker`` and
   ``title``).
-- ``GET /markets/{ticker}/orderbook`` returns bids only, in cents:
-  ``{"orderbook": {"yes": [[price_cents, size], ...],
-                   "no":  [[price_cents, size], ...]}}``.
-  The YES ask side is implied by the NO bids: a NO bid at ``c`` cents is a
-  YES ask at ``100 - c`` cents.
+- ``GET /markets/{ticker}/orderbook`` returns bids only. Two payload shapes
+  are accepted, because Kalshi migrated to a dollars representation:
+  ``{"orderbook_fp": {"yes_dollars": [[price_dollars, size], ...],
+                      "no_dollars":  [[price_dollars, size], ...]}}``
+  (current; prices and sizes are decimal *strings*), and the older
+  ``{"orderbook": {"yes": [[price_cents, size], ...], "no": [...]}}``.
+  The YES ask side is implied by the NO bids: a NO bid at price ``p`` is a
+  YES ask at ``1 - p``.
 
 Authentication: Kalshi signs requests with an RSA private key
 (``KALSHI-ACCESS-KEY`` / ``KALSHI-ACCESS-TIMESTAMP`` /
@@ -127,15 +130,24 @@ class KalshiClient(VenueClient):
     def get_book(self, market_id: str) -> BookSnapshot:
         """``market_id`` is a Kalshi market ticker, e.g. ``KXFEDCUT-26SEP``."""
         data = self._get_json(f"/markets/{market_id}/orderbook")
-        if not isinstance(data, dict) or "orderbook" not in data:
+        if not isinstance(data, dict):
             raise VenueError(f"kalshi orderbook for {market_id!r}: unexpected payload")
-        book = data["orderbook"] or {}
-        try:
+        if "orderbook_fp" in data:
+            book = data["orderbook_fp"] or {}
+            yes_bids = book.get("yes_dollars") or []
+            no_bids = book.get("no_dollars") or []
+            scale = 1.0
+        elif "orderbook" in data:
+            book = data["orderbook"] or {}
             yes_bids = book.get("yes") or []
             no_bids = book.get("no") or []
-            bids = [BookSide(px / 100.0, float(sz)) for px, sz in yes_bids]
-            # NO bid at c cents == YES ask at (100 - c) cents.
-            asks = [BookSide((100 - px) / 100.0, float(sz)) for px, sz in no_bids]
+            scale = 0.01
+        else:
+            raise VenueError(f"kalshi orderbook for {market_id!r}: unexpected payload")
+        try:
+            bids = [BookSide(float(px) * scale, float(sz)) for px, sz in yes_bids]
+            # NO bid at price p == YES ask at (1 - p).
+            asks = [BookSide(1.0 - float(px) * scale, float(sz)) for px, sz in no_bids]
         except (TypeError, ValueError) as exc:
             raise VenueError(
                 f"kalshi orderbook for {market_id!r}: bad level shape: {exc}"
