@@ -6,24 +6,32 @@ Two tables plus a small meta table:
   the full book as JSON. Upserted, so re-running a replay is idempotent.
 - ``dislocations``: one row per episode, keyed on
   (pair, kind, direction, first_seen) so replays stay idempotent.
+- ``resolutions``: one row per settled market leg, keyed on (venue,
+  market_id). Records how a market actually settled, which nothing else here
+  does — the books say what a market was priced at, never what happened.
+  ``label_source`` names the derivation, because the two venues differ in how
+  directly they state an outcome and a calibration study needs to know which
+  labels are independent of price.
 - ``meta``: provenance. ``source`` is ``"fixtures"``, ``"demo"``, or
   ``"live"`` and drives the honesty footer in reports.
 
 Schema versioning uses ``PRAGMA user_version``: version 2 adds the
 ``fetched_at`` column (wall-clock fetch time; snapshot ``ts`` may be a
-fixture timestamp) to existing databases via ``ALTER TABLE``.
+fixture timestamp) to existing databases via ``ALTER TABLE``; version 3 adds
+``resolutions``.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .detect import book_stats
 from .models import BookSnapshot, Dislocation, format_ts
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -56,6 +64,20 @@ CREATE TABLE IF NOT EXISTS dislocations (
     source       TEXT NOT NULL DEFAULT 'live',
     UNIQUE (pair, kind, direction, first_seen)
 );
+CREATE TABLE IF NOT EXISTS resolutions (
+    id            INTEGER PRIMARY KEY,
+    venue         TEXT NOT NULL,
+    market_id     TEXT NOT NULL,
+    pair          TEXT NOT NULL DEFAULT '',
+    outcome       INTEGER,
+    resolved_ts   TEXT,
+    venue_status  TEXT NOT NULL DEFAULT '',
+    raw_label     TEXT NOT NULL DEFAULT '',
+    label_source  TEXT NOT NULL DEFAULT '',
+    series_ticker TEXT NOT NULL DEFAULT '',
+    recorded_at   TEXT NOT NULL,
+    UNIQUE (venue, market_id)
+);
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -65,6 +87,9 @@ CREATE TABLE IF NOT EXISTS meta (
 _MIGRATIONS = {
     # version -> SQL applied to upgrade an existing database to that version
     2: ("ALTER TABLE snapshots ADD COLUMN fetched_at TEXT",),
+    # 3 adds `resolutions`. No ALTER needed: SCHEMA runs on every open, so
+    # CREATE TABLE IF NOT EXISTS reaches existing databases as well.
+    3: (),
 }
 
 
@@ -149,6 +174,64 @@ class Store:
             ),
         )
         self.conn.commit()
+
+    # -- resolutions --------------------------------------------------------
+
+    def upsert_resolution(
+        self,
+        venue: str,
+        market_id: str,
+        *,
+        outcome: int | None,
+        resolved_ts: str | None,
+        venue_status: str = "",
+        raw_label: str = "",
+        label_source: str = "",
+        series_ticker: str = "",
+        pair: str = "",
+        recorded_at: str | None = None,
+    ) -> None:
+        """Record how one market leg settled.
+
+        Idempotent on (venue, market_id), and deliberately *not* write-once:
+        a market can move from `determined` to `finalized`, and Kalshi can
+        mark one `disputed` or `amended` afterwards. Overwriting on each poll
+        lets a reversal land; `venue_status` and `raw_label` are stored
+        verbatim so a reversal is visible rather than silently absorbed.
+        """
+        self.conn.execute(
+            """
+            INSERT INTO resolutions
+                (venue, market_id, pair, outcome, resolved_ts, venue_status,
+                 raw_label, label_source, series_ticker, recorded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(venue, market_id) DO UPDATE SET
+                outcome=excluded.outcome, resolved_ts=excluded.resolved_ts,
+                venue_status=excluded.venue_status,
+                raw_label=excluded.raw_label,
+                label_source=excluded.label_source,
+                series_ticker=excluded.series_ticker,
+                recorded_at=excluded.recorded_at
+            """,
+            (
+                venue, market_id, pair, outcome, resolved_ts, venue_status,
+                raw_label, label_source, series_ticker,
+                recorded_at or format_ts(datetime.now(timezone.utc)),
+            ),
+        )
+        self.conn.commit()
+
+    def resolutions(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM resolutions ORDER BY venue, market_id"
+        ).fetchall()
+
+    def resolved_market_ids(self) -> set[str]:
+        """Legs already recorded as settled, so polling can skip them."""
+        rows = self.conn.execute(
+            "SELECT venue, market_id FROM resolutions WHERE outcome IS NOT NULL"
+        ).fetchall()
+        return {f"{r['venue']}:{r['market_id']}" for r in rows}
 
     # -- dislocations -------------------------------------------------------
 

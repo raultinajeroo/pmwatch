@@ -12,7 +12,7 @@ import pytest
 
 from pmwatch.credentials import CredentialError, check_kalshi_credentials
 from pmwatch.modes import ModeError, load_config, resolve_mode
-from pmwatch.store import Store
+from pmwatch.store import SCHEMA_VERSION, Store
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = REPO_ROOT / "fixtures"
@@ -213,7 +213,15 @@ def test_store_migrates_v1_database(tmp_path):
         assert len(rows) == 1
         assert rows[0]["market_id"] == "KXFEDCUT-26SEP"
         (version,) = store.conn.execute("PRAGMA user_version").fetchone()
-        assert version == 2
+        assert version == SCHEMA_VERSION
+        # v3: a database created before `resolutions` existed still gains it,
+        # because SCHEMA is executed on every open rather than only at create.
+        tables = {
+            r[0] for r in store.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "resolutions" in tables
 
 
 # ------------------------------------------------------------- net plumbing

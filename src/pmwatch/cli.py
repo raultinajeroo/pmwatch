@@ -335,6 +335,57 @@ def cmd_live(args: argparse.Namespace) -> int:
     return _run_collection(args, "live")
 
 
+def cmd_resolve(args: argparse.Namespace) -> int:
+    """Record how each tracked market settled.
+
+    Collection answers what a market was priced at; nothing else in pmwatch
+    answers what actually happened. Without this the order books cannot be
+    scored against outcomes at all.
+
+    Run daily rather than once on an expected resolution date: markets resolve
+    early about as often as late (measured on Polymarket, only 53.9% resolve
+    after their scheduled end date). Legs already recorded as settled are
+    skipped, so a daily run costs one request per still-open leg and nothing
+    per settled one.
+    """
+    pairs = load_pairs(args.pairs)
+    venues = sorted({vid.split(":", 1)[0] for p in pairs
+                     for vid in (p.venue_a_id, p.venue_b_id)})
+    clients = _build_clients("live", venues, args.fixtures)
+
+    n_new = n_pending = n_failed = 0
+    with Store(args.db) as store:
+        done = store.resolved_market_ids()
+        for pair in pairs:
+            for vid in (pair.venue_a_id, pair.venue_b_id):
+                venue, market_id = vid.split(":", 1)
+                if f"{venue}:{market_id}" in done:
+                    continue
+                try:
+                    res = clients[venue].get_resolution(market_id)
+                except Exception as exc:  # one bad leg must not stop the rest
+                    print(f"pmwatch: warning: {pair.name}: {venue}: "
+                          f"resolution lookup failed: {exc}", file=sys.stderr)
+                    n_failed += 1
+                    continue
+                if res is None:
+                    print(f"pmwatch: warning: {pair.name}: {venue}: "
+                          f"market {market_id} not found", file=sys.stderr)
+                    n_failed += 1
+                    continue
+                store.upsert_resolution(venue, market_id, pair=pair.name, **res)
+                if res.get("outcome") is None:
+                    n_pending += 1
+                else:
+                    n_new += 1
+                    print(f"[{res['resolved_ts']}] {pair.name}: {venue} "
+                          f"resolved {'YES' if res['outcome'] else 'NO'} "
+                          f"({res['label_source']})")
+    print(f"pmwatch: {n_new} newly resolved, {n_pending} still open, "
+          f"{n_failed} lookup failures")
+    return 0
+
+
 def cmd_collect(args: argparse.Namespace) -> int:
     mode = _resolve_collection_mode(args)
     if mode is None:
@@ -441,6 +492,16 @@ def build_parser() -> argparse.ArgumentParser:
                         "network calls, no writes, nothing labeled live")
     add_detector_args(p_live)
     p_live.set_defaults(func=cmd_live)
+
+    p_resolve = sub.add_parser(
+        "resolve",
+        help="record how each tracked market settled (requires credentials)")
+    p_resolve.add_argument("--pairs", required=True, help="matched pairs YAML")
+    p_resolve.add_argument("--db", default="pmwatch_live.db",
+                           help="SQLite database path")
+    p_resolve.add_argument("--fixtures", default="fixtures",
+                           help=argparse.SUPPRESS)
+    p_resolve.set_defaults(func=cmd_resolve)
 
     p_report = sub.add_parser("report", help="daily markdown digest from a database")
     p_report.add_argument("--db", required=True, help="SQLite database path")

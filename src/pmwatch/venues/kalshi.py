@@ -127,6 +127,64 @@ class KalshiClient(VenueClient):
             }
         return self._market_cache[ticker]
 
+    def get_resolution(self, market_id: str) -> dict | None:
+        """How a market settled, or None if it cannot be found at all.
+
+        Kalshi states the outcome outright in ``result`` (yes/no/scalar), so
+        the label never has to be inferred from a price.
+
+        Two measured behaviours drive the shape of this (2026-08-11, neither
+        documented):
+
+        - ``/markets/{ticker}`` **404s roughly 75 days after settlement**
+          (observed: OK at 70d, 404 at 84d), and ``/markets?series_ticker=…``
+          with ``status=settled`` returns nothing for an aged-out series. The
+          fallback below reads ``/historical/markets``, which still carries
+          the settled row long after. Recording the series ticker matters:
+          that endpoint is queryable by series, not by market.
+        - ``expiration_time`` is a deprecated legacy field and is useless as a
+          settlement time — a market settled 2026-05-20 carries an
+          ``expiration_time`` of 2027-11-03, eighteen months later. Use
+          ``settlement_ts``.
+        """
+        series = market_id.split("-")[0]
+        market = None
+        try:
+            data = self._get_json(f"/markets/{market_id}")
+            if isinstance(data, dict):
+                market = data.get("market")
+        except VenueError:
+            market = None
+        if market is None:
+            # Aged out of the live endpoint; the historical one still has it.
+            data = self._get_json(
+                "/historical/markets",
+                params={"series_ticker": series, "limit": 200},
+            )
+            rows = (data or {}).get("markets") or []
+            match = [m for m in rows if m.get("ticker") == market_id]
+            if not match:
+                return None
+            market = match[0]
+
+        status = str(market.get("status") or "")
+        result = str(market.get("result") or "").strip().lower()
+        base = {
+            "venue_status": status,
+            "raw_label": result,
+            "label_source": "kalshi.result",
+            "series_ticker": series,
+        }
+        # Only `finalized` is terminal. `determined` is still inside the
+        # settlement timer, where the result may yet be disputed.
+        if status != "finalized" or result not in ("yes", "no"):
+            return {**base, "outcome": None, "resolved_ts": None}
+        return {
+            **base,
+            "outcome": 1 if result == "yes" else 0,
+            "resolved_ts": market.get("settlement_ts"),
+        }
+
     def get_book(self, market_id: str) -> BookSnapshot:
         """``market_id`` is a Kalshi market ticker, e.g. ``KXFEDCUT-26SEP``."""
         data = self._get_json(f"/markets/{market_id}/orderbook")

@@ -114,6 +114,70 @@ class PolymarketClient(VenueClient):
         self._market_cache[token_id] = meta
         return meta
 
+    def get_resolution(self, market_id: str) -> dict | None:
+        """How a market settled, or None if the market cannot be found.
+
+        Polymarket never states a winning outcome in words, but it does not
+        require guessing from a traded price either. On a resolved market
+        ``outcomePrices`` is the **settlement payout vector**, written by
+        resolution rather than by trading: measured across 600 closed markets
+        on 2026-08-11, 599 were exactly ``["0","1"]`` or ``["1","0"]``. The
+        single exception carried an AMM-derived value
+        (``0.0000000206…`` / ``0.9999999794…``) and was also the only market
+        whose ``umaResolutionStatus`` was not ``resolved``.
+
+        So the payout vector is the label, and the price-threshold path is a
+        rare fallback. ``label_source`` records which one was used, because a
+        calibration study needs to know whether a label is independent of the
+        price it will be scored against — the exact-payout rows are, the
+        threshold rows are not.
+
+        ``resolved_ts`` comes from ``closedTime``, never ``endDate``:
+        ``endDate`` is the *scheduled* deadline and only 53.9% of markets
+        resolve after it, with observed differences from -301 to +144 days.
+        """
+        # Gamma's token-id filter silently excludes closed markets unless
+        # `closed=true` is passed: a resolved market returns 0 rows from
+        # `?clob_token_ids=…` alone. Verified 2026-08-12. Without the second
+        # query every settled leg reads as "not found", which looks like a
+        # lookup failure rather than the resolution it actually is.
+        m = None
+        for extra in ({}, {"closed": "true"}):
+            data = self._get_json(
+                f"{self.gamma_base}/markets",
+                params={"clob_token_ids": market_id, **extra},
+            )
+            if isinstance(data, list) and data:
+                m = data[0]
+                break
+        if m is None:
+            return None
+        status = str(m.get("umaResolutionStatus") or "")
+        prices = _parse_json_list(m.get("outcomePrices"))
+        raw = json.dumps([str(p) for p in prices]) if prices else ""
+        base = {"venue_status": status, "raw_label": raw}
+
+        if not m.get("closed") or status != "resolved" or len(prices) < 2:
+            return {**base, "outcome": None, "resolved_ts": None,
+                    "label_source": "polymarket.unresolved"}
+
+        yes = float(prices[0])
+        if yes in (0.0, 1.0):
+            outcome, source = int(yes), "polymarket.payout_vector"
+        elif yes >= 0.98 or yes <= 0.02:
+            # Not an exact payout vector: this label is derived from a price
+            # and must not be used to validate that same price.
+            outcome, source = (1 if yes >= 0.98 else 0), "polymarket.price_threshold"
+        else:
+            return {**base, "outcome": None, "resolved_ts": None,
+                    "label_source": "polymarket.ambiguous"}
+        return {
+            **base,
+            "outcome": outcome,
+            "resolved_ts": m.get("closedTime"),
+            "label_source": source,
+        }
+
     def get_book(self, market_id: str) -> BookSnapshot:
         """``market_id`` is a Polymarket CLOB token id (the YES token)."""
         data = self._get_json(f"{self.clob_base}/book", params={"token_id": market_id})
