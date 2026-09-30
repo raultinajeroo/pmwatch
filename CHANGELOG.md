@@ -8,6 +8,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- `pmwatch export --format longshot|blameshift`: read-only, live-only
+  observation exports using `fetched_at`, with per-venue resolved JSONL
+  for longshot and per-market midpoint CSV for blameshift. JSONL preserves
+  outcome provenance and labels the estimator and first-observation bound.
 - Explicit fixture/demo/live modes. `pmwatch demo` runs the collection
   code path on fixture data (no keys, no network); `pmwatch live` makes
   real venue API calls and refuses to start without the required
@@ -35,6 +39,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- Collection timestamps each book after its response arrives, rather than
+  assigning the start of a pass to every book in that pass.
 - README quickstart now starts from `git clone` and links the roadmap.
 - The silent Kalshi paper-mode fallback was removed; explicit demo mode
   replaces it.

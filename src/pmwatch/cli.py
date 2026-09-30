@@ -5,6 +5,7 @@ Subcommands:
     demo     demo mode: the collection code path driven from fixture data
     live     live mode: real venue API calls (requires credentials)
     report   write a daily markdown digest from a snapshot database
+    export   export live observations for longshot or blameshift
     collect  one collection pass (legacy; use demo/live via --mode)
     watch    collect in a loop at a fixed interval (legacy; see --mode)
 
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
@@ -29,6 +31,7 @@ import httpx
 
 from .credentials import CredentialError, check_live_credentials
 from .detect import DislocationEngine, book_stats
+from .export import export_data
 from .match import PairConfigError, load_pairs
 from .models import Dislocation, MatchedPair, format_ts
 from .modes import ModeError, load_config, resolve_mode
@@ -110,6 +113,21 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- export
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    try:
+        count = export_data(args.db, args.out, format=args.format,
+                            venue=args.venue, market_id=args.market_id)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        return _err(str(exc))
+    unit = "markets" if args.format == "longshot" else "observations"
+    print(f"exported {count} {unit} to {args.out} "
+          "(live order-book midpoints, fetched_at timestamps)")
+    return 0
+
+
 # --------------------------------------------------------------------------- collection core
 
 
@@ -175,13 +193,14 @@ def _collect_once(
     still get observed. Unless ``fail_fast``, in which case it propagates.
     """
     closed_all: list[Dislocation] = []
-    fetched_at = format_ts(datetime.now(tz=timezone.utc))
     for pair in pairs:
         try:
             snap_a = clients[pair.venue_a].get_book(pair.market_id_a)
+            fetched_a = format_ts(datetime.now(tz=timezone.utc))
             snap_b = clients[pair.venue_b].get_book(pair.market_id_b)
-            store.upsert_snapshot(snap_a, source=source, fetched_at=fetched_at)
-            store.upsert_snapshot(snap_b, source=source, fetched_at=fetched_at)
+            fetched_b = format_ts(datetime.now(tz=timezone.utc))
+            store.upsert_snapshot(snap_a, source=source, fetched_at=fetched_a)
+            store.upsert_snapshot(snap_b, source=source, fetched_at=fetched_b)
             closed = engine.process(pair, snap_a, snap_b)
         except (VenueError, httpx.HTTPError, ValueError) as exc:
             if fail_fast:
@@ -509,6 +528,15 @@ def build_parser() -> argparse.ArgumentParser:
                           help="UTC date, YYYY-MM-DD (default: today)")
     p_report.add_argument("--out", help="write digest to a file instead of stdout")
     p_report.set_defaults(func=cmd_report)
+
+    p_export = sub.add_parser("export", help="export live observations for downstream research")
+    p_export.add_argument("--db", required=True, help="existing SQLite database (read-only)")
+    p_export.add_argument("--format", required=True, choices=["longshot", "blameshift"])
+    p_export.add_argument("--venue", required=True, choices=["kalshi", "polymarket"],
+                          help="export one venue at a time")
+    p_export.add_argument("--market-id", help="single market to export (required for blameshift)")
+    p_export.add_argument("--out", required=True, help="output JSONL or CSV file")
+    p_export.set_defaults(func=cmd_export)
 
     p_collect = sub.add_parser("collect", help="one collection pass (--mode demo|live)")
     p_collect.add_argument("--pairs", required=True, help="matched pairs YAML")

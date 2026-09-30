@@ -208,6 +208,50 @@ Matched pairs are configured in a YAML file (see
 across venues is manual work: resolution sources, deadlines, and settlement
 rules must genuinely agree before two markets are comparable.
 
+## Exporting observations
+
+`pmwatch export` reads an existing database without changing its schema or
+calling a venue. Exports select only `source=live` rows with two valid,
+non-crossed book sides and a recorded `fetched_at`; fixture/demo rows and
+legacy rows without an observation time are excluded.
+
+For [longshot](https://github.com/raultinajeroo/longshot), first record
+outcomes with `pmwatch resolve --pairs PAIRS.yaml --db observations.db`,
+then export each venue separately:
+
+```bash
+uv run pmwatch export --db observations.db --format longshot \
+  --venue kalshi --out resolved-kalshi.jsonl
+```
+
+The JSONL contains binary resolved markets with at least one observation
+strictly before settlement. Provenance records `price_estimator=order_book_mid`,
+`timestamp_source=fetched_at`, and the resolution's `label_source`.
+`created_ts` is the first usable observation, labeled
+`created_ts_source=first_observed`: market creation is not stored here.
+Volume and trader counts remain unknown. Analyze these midpoints separately
+from venue trade/candle histories; they measure different prices.
+
+For [blameshift](https://github.com/raultinajeroo/blameshift), export a single
+market, which need not be resolved:
+
+```bash
+uv run pmwatch export --db observations.db --format blameshift \
+  --venue kalshi --market-id MARKET_ID --out market.csv
+# In the blameshift checkout, with a separately prepared event log:
+uv run blameshift run --series market.csv --changes events.json \
+  --metric probability --json shifts.json --html shifts.html
+```
+
+The CSV is `timestamp,value`: UTC observation time and YES order-book mid
+in [0, 1]. Both formats sort observations and retain the last stored row
+at duplicate observation times. They do not interpolate missing samples.
+The store deduplicates unchanged books by venue timestamp, so an export
+cannot reconstruct every polling pass or guarantee a regular cadence.
+Older live runs stamped the start of the collection pass; new collection
+stamps each response after receipt. Historical timestamps are not rewritten.
+An empty export is an error and leaves an existing output file untouched.
+
 ## Honest limits
 
 - **The demo in this repository is fixture-based.** The bundled fixtures
