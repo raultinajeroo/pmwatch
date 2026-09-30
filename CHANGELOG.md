@@ -39,6 +39,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- Longshot JSONL exports retain the YES bid and ask alongside each midpoint,
+  using `[timestamp, midpoint, yes_bid, yes_ask]` points. Blameshift CSV
+  continues to contain only observation time and midpoint.
 - Schema v4 indexes snapshot fetch times so heartbeat freshness checks use
   a covering index instead of scanning stored order books under a read lock.
 - Collection timestamps each book after its response arrives, rather than

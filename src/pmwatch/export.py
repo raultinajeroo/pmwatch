@@ -13,7 +13,7 @@ from .models import format_ts, parse_ts
 
 def _observations(conn, venue, market_id, *, before=None):
     rows = conn.execute(
-        "SELECT fetched_at, mid FROM snapshots "
+        "SELECT fetched_at, mid, best_bid, best_ask FROM snapshots "
         "WHERE venue = ? AND market_id = ? AND source = 'live' "
         "AND fetched_at IS NOT NULL AND mid BETWEEN 0 AND 1 "
         "AND best_bid BETWEEN 0 AND 1 AND best_ask BETWEEN 0 AND 1 "
@@ -26,7 +26,7 @@ def _observations(conn, venue, market_id, *, before=None):
     for row in rows:
         observed = parse_ts(row["fetched_at"])
         if before is None or observed < before:
-            points[observed] = row["mid"]
+            points[observed] = (row["mid"], row["best_bid"], row["best_ask"])
     return sorted(points.items())
 
 
@@ -59,7 +59,7 @@ def _longshot_records(conn, venue):
             "outcome": resolution["outcome"],
             "volume": None,
             "n_traders": None,
-            "series": [[int(ts.timestamp()), mid] for ts, mid in points],
+            "series": [[int(ts.timestamp()), *prices] for ts, prices in points],
             "provenance": {
                 "source": "pmwatch",
                 "snapshot_source": "live",
@@ -97,8 +97,8 @@ def export_data(db, out, *, format, venue, market_id=None) -> int:
         if format == "longshot":
             rows = _longshot_records(conn, venue)
         else:
-            rows = [(format_ts(ts), mid)
-                    for ts, mid in _observations(conn, venue, market_id)]
+            rows = [(format_ts(ts), prices[0])
+                    for ts, prices in _observations(conn, venue, market_id)]
     if not rows:
         raise ValueError(
             "no usable live observations for this export; longshot also needs "

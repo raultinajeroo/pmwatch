@@ -234,6 +234,10 @@ strictly before settlement. Provenance records `price_estimator=order_book_mid`,
 `created_ts_source=first_observed`: market creation is not stored here.
 Volume and trader counts remain unknown. Analyze these midpoints separately
 from venue trade/candle histories; they measure different prices.
+Each series point is `[timestamp, midpoint, yes_bid, yes_ask]`, with both
+quotes from the same stored observation. Longshot preserves these quotes
+for its optional `correct --cost-per-contract` payoff screen; a displayed
+quote does not establish a fill or an exchange fee.
 
 For [blameshift](https://github.com/raultinajeroo/blameshift), export a single
 market, which need not be resolved:

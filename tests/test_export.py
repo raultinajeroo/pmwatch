@@ -41,6 +41,7 @@ def test_longshot_export_filters_and_preserves_provenance(tmp_path):
     with Store(db) as store:
         snapshot(store, 0, book_minute=-60)
         snapshot(store, 30, book_minute=-30)
+        snapshot(store, 30, book_minute=-20, bid=0.2, ask=0.6)  # later row, same mid
         snapshot(store, 50, source="demo")
         snapshot(store, 55, source="fixtures")
         snapshot(store, 60, fetched=False)
@@ -60,8 +61,8 @@ def test_longshot_export_filters_and_preserves_provenance(tmp_path):
     records = [json.loads(line) for line in out.read_text().splitlines()]
     assert len(records) == 1
     record = records[0]
-    assert record["series"] == [[int(START.timestamp()), 0.4],
-                                [int(START.timestamp()) + 1800, 0.4]]
+    assert record["series"] == [[int(START.timestamp()), 0.4, 0.3, 0.5],
+                                [int(START.timestamp()) + 1800, 0.4, 0.2, 0.6]]
     assert record["created_ts"] == int(START.timestamp())
     assert record["resolved_ts"] == int(START.timestamp()) + 7200
     assert record["outcome"] == 1
