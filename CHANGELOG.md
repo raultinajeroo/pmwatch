@@ -39,6 +39,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- Schema v4 indexes snapshot fetch times so heartbeat freshness checks use
+  a covering index instead of scanning stored order books under a read lock.
 - Collection timestamps each book after its response arrives, rather than
   assigning the start of a pass to every book in that pass.
 - README quickstart now starts from `git clone` and links the roadmap.

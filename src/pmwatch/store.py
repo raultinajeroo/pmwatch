@@ -18,7 +18,8 @@ Two tables plus a small meta table:
 Schema versioning uses ``PRAGMA user_version``: version 2 adds the
 ``fetched_at`` column (wall-clock fetch time; snapshot ``ts`` may be a
 fixture timestamp) to existing databases via ``ALTER TABLE``; version 3 adds
-``resolutions``.
+``resolutions``; version 4 indexes ``fetched_at`` so freshness checks do not
+scan every stored book while holding a SQLite read lock.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from pathlib import Path
 from .detect import book_stats
 from .models import BookSnapshot, Dislocation, format_ts
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -90,6 +91,8 @@ _MIGRATIONS = {
     # 3 adds `resolutions`. No ALTER needed: SCHEMA runs on every open, so
     # CREATE TABLE IF NOT EXISTS reaches existing databases as well.
     3: (),
+    # Run after v2: older databases do not yet have fetched_at when SCHEMA runs.
+    4: ("CREATE INDEX IF NOT EXISTS snapshots_fetched_at ON snapshots(fetched_at)",),
 }
 
 

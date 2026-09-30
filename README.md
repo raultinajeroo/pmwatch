@@ -202,6 +202,9 @@ venue) with bounded retries and jittered exponential backoff. Every stored
 snapshot records its provenance (`source` column: fixture/demo/live) and
 its wall-clock fetch time (`fetched_at`, added by the v2 schema migration;
 old databases upgrade automatically).
+The v4 migration indexes `fetched_at`, so `SELECT MAX(fetched_at)` freshness
+checks can use a covering index without scanning stored books. Opening a
+database through `Store` applies migrations; read-only exports do not.
 
 Matched pairs are configured in a YAML file (see
 `config/pairs.example.yaml` for the annotated format). Matching markets

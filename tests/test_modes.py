@@ -224,6 +224,32 @@ def test_store_migrates_v1_database(tmp_path):
         assert "resolutions" in tables
 
 
+@pytest.mark.parametrize("version", [0, 3])
+def test_freshness_query_uses_index_after_migration(tmp_path, version):
+    """Heartbeat reads must not scan every book while holding a read lock."""
+    from pmwatch.store import SCHEMA
+
+    db = tmp_path / "freshness.db"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(SCHEMA)
+        conn.execute(f"PRAGMA user_version = {version}")
+        conn.execute(
+            "INSERT INTO snapshots (ts, venue, market_id, book_json, fetched_at) "
+            "VALUES ('2026-01-01T00:00:00Z', 'test', 'one', '{}', "
+            "'2026-01-01T00:01:00Z')"
+        )
+    # Reopening must be harmless as well as upgrading the original database.
+    for _ in range(2):
+        with Store(db) as store:
+            plan = store.conn.execute(
+                "EXPLAIN QUERY PLAN SELECT MAX(fetched_at) FROM snapshots"
+            ).fetchall()
+            assert any("USING COVERING INDEX" in row[3] for row in plan)
+            assert store.conn.execute(
+                "SELECT MAX(fetched_at) FROM snapshots"
+            ).fetchone()[0] == "2026-01-01T00:01:00Z"
+
+
 # ------------------------------------------------------------- net plumbing
 
 
